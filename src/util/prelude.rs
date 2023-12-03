@@ -1,6 +1,7 @@
 pub use anyhow::*;
 pub use itertools::Itertools;
 use nom::{character::complete::line_ending, IResult, Parser};
+use nom_supreme::{error::ErrorTree, final_parser::Location};
 
 pub fn ascii_code(c: char) -> i64 {
     c.to_string().bytes().next().unwrap() as i64
@@ -90,9 +91,9 @@ impl<T> Grid<T> {
         })
     }
 
-    pub fn parse<'a, F: Parser<&'a str, Vec<T>, nom::error::Error<&'a str>>>(
+    pub fn parse<'a, F: Parser<&'a str, Vec<T>, ErrorTree<&'a str>>>(
         mut line_parser: F,
-    ) -> impl Parser<&'a str, Self, nom::error::Error<&'a str>> {
+    ) -> impl Parser<&'a str, Self, ErrorTree<&'a str>> {
         move |input| match line_parser.parse(input) {
             IResult::Ok((input, first_line)) => {
                 let length = first_line.len();
@@ -168,3 +169,6 @@ where
         }
     }
 }
+
+pub type ParseResult<'a, T> = IResult<&'a str, T, ErrorTree<&'a str>>;
+pub type ParseFinalResult<'a, T> = Result<T, ErrorTree<Location>>;
