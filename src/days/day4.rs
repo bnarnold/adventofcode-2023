@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     num::ParseIntError,
 };
 
@@ -25,30 +25,27 @@ pub fn level1(input: &str) -> usize {
     input
         .lines()
         .map(|l| parse_line(l).expect("line parse"))
-        .map(|count| if count == 0 { 0 } else { 1 << (count - 1) })
+        .filter_map(|count| count.checked_sub(1).map(|x| 1 << x))
         .sum()
 }
 
 pub fn level2(input: &str) -> usize {
     let mut total: usize = 0;
-    let mut previous_card_info = Vec::new();
-    for line in input.lines() {
+    let mut copy_count = 0;
+    let mut copy_count_offsets = BTreeMap::new();
+    for (i, line) in input.lines().enumerate() {
+        // get copy_count cards from previous, and another one because we already have it
         let count = parse_line(line).expect("line parse");
-        let mut copies = 1;
-        previous_card_info = previous_card_info
-            .into_iter()
-            .filter_map(|(remaining_winners, card_copies)| {
-                copies += card_copies;
-                if remaining_winners > 1 {
-                    Some((remaining_winners - 1, card_copies))
-                } else {
-                    None
-                }
-            })
-            .collect();
-        total += copies;
+        total += copy_count + 1;
         if count > 0 {
-            previous_card_info.push((count, copies))
+            *copy_count_offsets.entry(i + count).or_default() += copy_count + 1;
+            copy_count = 2 * copy_count + 1;
+        }
+        if let Some(min) = copy_count_offsets.first_entry() {
+            if *min.key() == i {
+                copy_count -= min.get();
+                min.remove();
+            }
         }
     }
     total
