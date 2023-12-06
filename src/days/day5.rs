@@ -100,7 +100,7 @@ pub fn level1(input: &str) -> usize {
     offsets.into_iter().min().expect("empty offsets")
 }
 
-pub fn level2(input: &str) -> usize {
+pub fn level2(_input: &str) -> usize {
     0
 }
 
