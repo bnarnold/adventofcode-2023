@@ -45,6 +45,14 @@ struct Cycle {
 }
 
 impl Cycle {
+    fn all_hits() -> Self {
+        Self {
+            prefix_length: 0,
+            prefix_hits: Vec::new(),
+            cycle_length: 1,
+            cycle_hits: vec![0],
+        }
+    }
     fn rotate(&mut self, steps: usize) {
         self.prefix_length += steps;
         let full_rotations = steps / self.cycle_length;
@@ -55,7 +63,10 @@ impl Cycle {
             })
         }));
 
-        let split_point = self.cycle_hits.partition_point(|x| *x >= steps);
+        let partial_rotation_steps = steps % self.cycle_length;
+        let split_point = self
+            .cycle_hits
+            .partition_point(|x| *x >= partial_rotation_steps);
         self.prefix_hits.extend(
             self.cycle_hits[..split_point]
                 .iter()
@@ -157,8 +168,9 @@ impl Cycle {
                     } else {
                         (other_cycle_len as isize + offset) as usize
                     };
-                    // so this is other_hit mod other_cycle_len
+                    // …so this is other_hit mod other_cycle_len…
                     let lift = self_hit + self_cycle_len * offset;
+                    // and this is rem + d * {self,other}_hit mod {self, other}.cycle_length
                     let lift = rem + d * lift;
                     cycle_hits.push(lift);
                 }
@@ -183,6 +195,52 @@ impl Cycle {
 }
 
 impl<'a> Graph<'a> {
+    fn new(
+        directions: &[Direction],
+        mappings: &HashMap<&'a str, (&'a str, &'a str)>,
+        mut is_target: impl FnMut(&str) -> bool,
+    ) -> Self {
+        let step_length = directions.len();
+        let mut nodes: HashMap<_, _> = mappings
+            .iter()
+            .map(|(&src, _)| {
+                (
+                    src,
+                    Node {
+                        next: src,
+                        targets: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        for (i, dir) in directions.iter().enumerate() {
+            let new_nodes = nodes
+                .into_iter()
+                .map(|(label, Node { next, mut targets })| {
+                    (
+                        label,
+                        Node {
+                            next: {
+                                let children = mappings[next];
+                                match dir {
+                                    Direction::Left => children.0,
+                                    Direction::Right => children.1,
+                                }
+                            },
+                            targets: {
+                                if is_target(next) {
+                                    targets.push(i);
+                                }
+                                targets
+                            },
+                        },
+                    )
+                })
+                .collect();
+            nodes = new_nodes
+        }
+        Graph { step_length, nodes }
+    }
     fn cycle(&self, start: &'a str) -> Cycle {
         let mut label = start;
         let mut hits = Vec::new();
@@ -253,82 +311,26 @@ fn parse_input(input: &str) -> ParseFinalResult<Input> {
     )(input)
 }
 
-fn build_graph<'a>(
-    directions: &[Direction],
-    mappings: &HashMap<&'a str, (&'a str, &'a str)>,
-    mut is_target: impl FnMut(&str) -> bool,
-) -> Graph<'a> {
-    let step_length = directions.len();
-    let mut nodes: HashMap<_, _> = mappings
-        .iter()
-        .map(|(&src, _)| {
-            (
-                src,
-                Node {
-                    next: src,
-                    targets: Vec::new(),
-                },
-            )
-        })
-        .collect();
-    for (i, dir) in directions.iter().enumerate() {
-        let new_nodes = nodes
-            .into_iter()
-            .map(|(label, Node { next, mut targets })| {
-                (
-                    label,
-                    Node {
-                        next: {
-                            let children = mappings[next];
-                            match dir {
-                                Direction::Left => children.0,
-                                Direction::Right => children.1,
-                            }
-                        },
-                        targets: {
-                            if is_target(next) {
-                                targets.push(i);
-                            }
-                            targets
-                        },
-                    },
-                )
-            })
-            .collect();
-        nodes = new_nodes
-    }
-    Graph { step_length, nodes }
-}
-
 pub fn level1(input: &str) -> usize {
     let (directions, mappings) = parse_input(input).expect("parse error");
-    let graph = build_graph(&directions, &mappings, |s| s == "ZZZ");
+    let graph = Graph::new(&directions, &mappings, |s| s == "ZZZ");
     let cycle = graph.cycle("AAA");
     cycle.first().expect("target is unreachable")
 }
 
 pub fn level2(input: &str) -> usize {
     let (directions, mappings) = parse_input(input).expect("parse error");
-    let graph = build_graph(&directions, &mappings, |s| s.ends_with('Z'));
+    let graph = Graph::new(&directions, &mappings, |s| s.ends_with('Z'));
     let cycle = mappings
         .keys()
         .filter(|s| s.ends_with('A'))
         .map(|s| graph.cycle(s))
-        .fold(
-            Cycle {
-                prefix_length: 0,
-                prefix_hits: Vec::new(),
-                cycle_length: 1,
-                cycle_hits: vec![0],
-            },
-            |c1, c2| c1.intersect(c2),
-        );
+        .fold(Cycle::all_hits(), |c1, c2| c1.intersect(c2));
     cycle.first().expect("target state is unreachable")
 }
 
 #[cfg(test)]
 mod test {
-    //
     use super::*;
 
     #[test]
