@@ -1,4 +1,3 @@
-pub use anyhow::*;
 pub use itertools::Itertools;
 use nom::{character::complete::line_ending, IResult, Parser};
 use nom_supreme::{error::ErrorTree, final_parser::Location};

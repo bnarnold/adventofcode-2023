@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::util::prelude::*;
-use anyhow::Result;
+use anyhow::*;
 use itertools::Either;
 
 fn parse_line(line: &str) -> Result<usize> {
