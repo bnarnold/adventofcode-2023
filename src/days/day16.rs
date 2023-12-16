@@ -3,7 +3,7 @@ use core::fmt::Formatter;
 use core::str::FromStr;
 use std::collections::VecDeque;
 use std::fmt::Write;
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 enum Piece {
     Empty,
     MirrorAigu,
@@ -11,8 +11,9 @@ enum Piece {
     VSplitter,
     HSplitter,
 }
+use rayon::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Field(Piece, u8);
 
 impl From<&Field> for char {
@@ -124,7 +125,7 @@ impl Field {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Grid<T> {
     data: Vec<T>,
     width: usize,
@@ -204,12 +205,6 @@ impl Grid<Field> {
             .filter_map(move |next_dir| Some((self.step(pos, next_dir)?, next_dir)))
     }
 
-    fn reset(&mut self) {
-        for field in &mut self.data {
-            field.1 = 0;
-        }
-    }
-
     fn energized_count(&self) -> usize {
         self.data
             .iter()
@@ -221,17 +216,17 @@ impl Grid<Field> {
 fn level1(input: &str) -> usize {
     let mut grid: Grid<Field> = input.parse().expect("Parse error");
     grid.energize(0, Direction::East);
-    println!("{grid}");
     grid.energized_count()
 }
 
 fn level2(input: &str) -> usize {
-    let mut grid: Grid<Field> = input.parse().expect("Parse error");
+    let grid: Grid<Field> = input.parse().expect("Parse error");
     (0..grid.width)
+        .into_par_iter()
         .flat_map(|i| [(i, Direction::South), (i, Direction::North)])
-        .chain((0..grid.height).flat_map(|j| [(j, Direction::East), (j, Direction::West)]))
+        .chain((0..grid.height).into_par_iter().flat_map(|j| [(j, Direction::East), (j, Direction::West)]))
         .map(|(pos, dir)| {
-            grid.reset();
+            let mut grid = grid.clone();
             grid.energize(pos, dir);
             grid.energized_count()
         })
@@ -252,8 +247,6 @@ fn main() {
 .|....-|.\
 ..//.|....
 ";
-    let grid: Grid<Field> = input.parse().unwrap();
-    println!("{grid}");
     println!("{}", level1(input));
     println!("{}", level2(input));
 }
