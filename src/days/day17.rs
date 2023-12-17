@@ -1,10 +1,123 @@
-use core::cmp::Ordering;
 use core::fmt::Display;
 use core::fmt::Formatter;
-use core::num::NonZeroU32;
 use core::str::FromStr;
-use std::collections::BinaryHeap;
 use std::fmt::Write;
+
+#[derive(Debug, Clone)]
+enum DataState {
+    Waiting(usize),
+    Done,
+}
+
+#[derive(Debug, Clone, Default)]
+struct KeyedPriorityQueue<Priority> {
+    queue: Vec<(Priority, usize)>,
+    data: Vec<DataState>,
+}
+
+impl<Priority: Ord> KeyedPriorityQueue<Priority> {
+    fn swap_data_indices(&mut self, heap_index_1: usize, heap_index_2: usize) {
+        let data_index_1 = self.queue[heap_index_1].1;
+        let data_index_2 = self.queue[heap_index_2].1;
+        let DataState::Waiting(stored_heap_index_1) = &mut self.data[data_index_1] else {
+            unreachable!("Queue entry not waiting")
+        };
+        debug_assert_eq!(stored_heap_index_1, &heap_index_1);
+        *stored_heap_index_1 = heap_index_2;
+        let DataState::Waiting(stored_heap_index_2) = &mut self.data[data_index_2] else {
+            unreachable!("Queue entry not waiting")
+        };
+        debug_assert_eq!(stored_heap_index_2, &heap_index_2);
+        *stored_heap_index_2 = heap_index_1;
+    }
+
+    fn swap_remove(&mut self, heap_index: usize) -> Option<(Priority, usize)> {
+        let heap_index_end = self.queue.len().checked_sub(1)?;
+        self.swap_data_indices(heap_index, heap_index_end);
+        let (priority, data_index) = self.queue.swap_remove(heap_index);
+        let DataState::Waiting(stored_heap_index) = self.data.get(data_index)? else {
+            unreachable!("Queue entry not waiting")
+        };
+        debug_assert_eq!(stored_heap_index, &heap_index_end);
+        Some((priority, data_index))
+    }
+
+    fn swap(&mut self, heap_index_1: usize, heap_index_2: usize) {
+        self.swap_data_indices(heap_index_1, heap_index_2);
+        self.queue.swap(heap_index_1, heap_index_2);
+    }
+
+    fn heapify_up(&mut self, mut heap_index: usize) -> usize {
+        while heap_index > 0 {
+            let next_heap_index = (heap_index - 1) / 2;
+            if self.queue[heap_index].0 < self.queue[next_heap_index].0 {
+                self.swap(heap_index, next_heap_index);
+                heap_index = next_heap_index;
+            } else {
+                return heap_index;
+            }
+        }
+        heap_index
+    }
+
+    fn heapify_down(&mut self, mut heap_index: usize) -> usize {
+        while 2 * heap_index + 1 < self.queue.len() {
+            let left = 2 * heap_index + 1;
+            let right = 2 * heap_index + 2;
+            let next_heap_index =
+                if right < self.queue.len() && self.queue[right].0 < self.queue[left].0 {
+                    right
+                } else {
+                    left
+                };
+            if self.queue[next_heap_index].0 < self.queue[heap_index].0 {
+                self.swap(heap_index, next_heap_index);
+                heap_index = next_heap_index;
+            } else {
+                return heap_index;
+            }
+        }
+        heap_index
+    }
+
+    pub fn update_priority(&mut self, data_index: usize, priority: Priority) {
+        let entry = &mut self.data[data_index];
+        match entry {
+            DataState::Waiting(guard) if *guard == usize::MAX => {
+                let heap_index = self.queue.len();
+                *entry = DataState::Waiting(heap_index);
+                self.queue.push((priority, data_index));
+                self.heapify_up(heap_index);
+            }
+            DataState::Waiting(heap_index) => {
+                let heap_index = *heap_index;
+                let stored_priority = &mut self.queue[heap_index].0;
+                if *stored_priority > priority {
+                    *stored_priority = priority;
+                    if self.heapify_up(heap_index) == heap_index {
+                        self.heapify_down(heap_index);
+                    }
+                }
+            }
+            DataState::Done => {}
+        }
+    }
+
+    pub fn pop(&mut self) -> Option<(Priority, usize)> {
+        let (priority, data_index) = self.swap_remove(0)?;
+        let entry = &mut self.data[data_index];
+        match entry {
+            DataState::Waiting(heap_index) => {
+                debug_assert!(*heap_index < usize::MAX, "entry not in queue");
+                debug_assert_eq!(heap_index, &self.queue.len());
+                *entry = DataState::Done;
+            }
+            DataState::Done => unreachable!("Queue entry already done"),
+        }
+        self.heapify_down(0);
+        Some((priority, data_index))
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 struct Field(u8);
@@ -34,51 +147,12 @@ impl TryFrom<char> for Field {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 enum Direction {
     North,
     West,
     South,
     East,
-}
-
-impl Direction {
-    fn index(self) -> usize {
-        match self {
-            Direction::North => 0,
-            Direction::West => 1,
-            Direction::South => 2,
-            Direction::East => 3,
-        }
-    }
-
-    fn rotate_left(self) -> Direction {
-        match self {
-            Direction::North => Direction::West,
-            Direction::West => Direction::South,
-            Direction::South => Direction::East,
-            Direction::East => Direction::North,
-        }
-    }
-
-    fn rotate_right(self) -> Direction {
-        match self {
-            Direction::North => Direction::East,
-            Direction::West => Direction::North,
-            Direction::South => Direction::West,
-            Direction::East => Direction::South,
-        }
-    }
-
-    fn next_directions(self, remaining_steps: u8, max_straight: u8, min_before_turn: u8) -> impl Iterator<Item = (Self, u8)> {
-        [
-            remaining_steps.checked_sub(1).map(|steps| (self, steps)),
-            (remaining_steps + min_before_turn <= max_straight).then_some((self.rotate_left(), max_straight - 1)),
-            (remaining_steps + min_before_turn <= max_straight).then_some((self.rotate_right(), max_straight - 1)),
-        ]
-        .into_iter()
-        .flatten()
-    }
 }
 
 impl From<Direction> for (isize, isize) {
@@ -137,60 +211,45 @@ impl<T: TryFrom<char>> FromStr for Grid<T> {
 
 type Pos = (usize, usize);
 
-#[derive(Debug, PartialEq, Eq)]
-struct Step(Pos, u8, Direction, u32);
-
-impl PartialOrd for Step {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Step {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.3.cmp(&other.3).reverse()
-    }
-}
+#[derive(Debug)]
+struct GraphNode(Pos, usize, Direction);
 
 impl Grid<Field> {
     fn find_cart_path(&self, max_straight: u8, min_before_turn: u8) -> Option<u32> {
-        let mut costs: Vec<Option<NonZeroU32>> = vec![None; self.data.len() * max_straight as usize * 4];
-        let mut queue = BinaryHeap::new();
-        queue.push(Step((1, 0), max_straight - 1, Direction::East, self.data[1].cost()));
-        queue.push(Step(
-            (0, 1),
-            max_straight - 1,
-            Direction::South,
-            self.data[self.width].cost()
-        ));
-        while let Some(Step(pos, remaining_steps, dir, cost)) = queue.pop() {
-            if pos == (self.width - 1, self.height - 1) && remaining_steps + min_before_turn <= max_straight {
+        let mut queue = KeyedPriorityQueue {
+            queue: Vec::with_capacity(self.width),
+            data: vec![DataState::Waiting(usize::MAX); self.data.len() * 2],
+        };
+        queue.update_priority(0, 0);
+        queue.update_priority(1, 0);
+        while let Some((cost, ix)) = queue.pop() {
+            let pos = (ix / 2 % self.width, ix / 2 / self.width);
+            let is_horizontal = ix % 2 == 1;
+            if pos == (self.width - 1, self.height - 1) {
                 return Some(cost.into());
             }
-            let stored_cost = &mut costs
-                [4 * max_straight as usize * (pos.0 + pos.1 * self.width) + 4 * remaining_steps as usize + dir.index()];
-            if let Some(stored_cost) = stored_cost {
-                if u32::from(*stored_cost) <= cost {
-                    continue;
+            for dir in if is_horizontal {
+                [Direction::West, Direction::East]
+            } else {
+                [Direction::North, Direction::South]
+            } {
+                let mut next_pos = pos;
+                let mut next_cost = cost;
+                for i in 0..max_straight {
+                    let Some(next) = self.step(next_pos, dir) else {
+                        break;
+                    };
+                    next_pos = next;
+                    next_cost += self.data[next.0 + self.width * next.1].cost();
+                    if i + 1 >= min_before_turn {
+                        queue.update_priority(
+                            2 * (next_pos.0 + self.width * next_pos.1)
+                                + if is_horizontal { 0 } else { 1 },
+                            next_cost,
+                        );
+                    }
                 }
             }
-            *stored_cost = cost.try_into().ok();
-            queue.extend(
-                dir.next_directions(remaining_steps, max_straight, min_before_turn)
-                    .filter_map(|(dir, remaining_steps)| {
-                        Some((self.step(pos, dir)?, dir, remaining_steps))
-                    })
-                    .map(|(pos, dir, remaining_steps)| {
-                        let new_cost = 
-                            cost + self.data[pos.0 + self.width * pos.1].cost();
-                        Step(
-                            pos,
-                            remaining_steps,
-                            dir,
-                            new_cost,
-                        )
-                    }),
-            )
         }
         return None;
     }
